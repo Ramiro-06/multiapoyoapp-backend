@@ -1,0 +1,39 @@
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from core.models import Branch
+from core.models_security import Role, UserRole
+
+OWNER_ROLE_CODE = ["OWNER_ADMIN", "CAJERO", "SUPERVISOR"]
+
+
+def _require_owner_admin(request):
+    # Esto obtiene los códigos de los roles del usuario, ej: {'CAJERO'}
+    user_roles = set(UserRole.objects.filter(user=request.user).values_list("role__code", flat=True))
+    
+    # OWNER_ROLE_CODE es una lista: ["OWNER_ADMIN", "CAJERO", "SUPERVISOR"]
+    # Usamos 'any' para ver si alguno de los roles permitidos está en los roles del usuario
+    return any(role in user_roles for role in OWNER_ROLE_CODE)
+
+
+class RolesMetaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not _require_owner_admin(request):
+            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+
+        data = list(Role.objects.all().values("code", "name"))
+        return Response(data)
+
+
+class BranchesMetaView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not _require_owner_admin(request):
+            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+
+        data = list(Branch.objects.filter(is_active=True).values("code", "name"))
+        return Response(data)
