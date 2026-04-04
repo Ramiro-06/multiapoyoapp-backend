@@ -22,6 +22,8 @@ from core.api.views.cash_session_movements import CashSessionMovementsView
 from core.api.views.users_admin import UserListCreateView, UserDetailUpdateView
 from core.api.views.meta import RolesMetaView, BranchesMetaView
 
+from core.api.views.cash_summary import CashSessionSummaryView
+
 
 
 urlpatterns = [
@@ -43,11 +45,13 @@ urlpatterns = [
     path("cash-sessions/reopen", CashSessionReopenView.as_view()),
     path("cash-sessions/<uuid:cash_session_id>/closing-report.pdf", CashSessionClosingReportPDFView.as_view()),
     path("reports/daily-summary", DailySummaryReportView.as_view()),
-    path("reports/daily-summary-pdf", DailySummaryReportPDFView.as_view()),
+    path("reports/daily-summary.pdf", DailySummaryReportPDFView.as_view()),
     path("cash-sessions/<uuid:cash_session_id>/movements", CashSessionMovementsView.as_view()),
     path("users", UserListCreateView.as_view()),
     path("users/<int:user_id>", UserDetailUpdateView.as_view()),
     path("meta/roles", RolesMetaView.as_view()),
     path("meta/branches", BranchesMetaView.as_view()),
+
+    path("cash-sessions/<uuid:session_id>/summary", CashSessionSummaryView.as_view()),
 
 ]
