@@ -1,36 +1,54 @@
-# crear_cajero.py
-import os
-import django
+import uuid
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from core.models import Branch, CashRegister
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "configuracion.settings")  # cambia esto
-django.setup()
+class Command(BaseCommand):
+    help = 'Crea una caja registradora para la sucursal PT1 compatible con el Serializer'
 
-from django.contrib.auth import get_user_model
-from core.models_security import Role, UserRole
-from core.models import Branch, UserBranchAccess  # ajusta si UserBranchAccess está en models_security
+    def handle(self, *args, **options):
+        self.stdout.write("--- Iniciando Seed de Caja Registradora ---")
 
-User = get_user_model()
+        try:
+            with transaction.atomic():
+                # 1. Asegurar que existe la sucursal PT1
+                # El serializer usa branch.code, así que este campo es vital.
+                branch, b_created = Branch.objects.get_or_create(
+                    code="PT1",
+                    defaults={
+                        "name": "PT1",
+                        "is_active": True
+                    }
+                )
 
-# ── Datos del cajero ───────────────────────────────────────────
-USERNAME  = "dueno"
-PASSWORD  = "dueno1234"
-ROLE_CODE = "OWNER_ADMIN"
-BRANCH_CODE = "PT1"
+                if b_created:
+                    self.stdout.write(self.style.SUCCESS(f"Sucursal {branch.code} creada."))
 
-# Crear usuario
-if User.objects.filter(username=USERNAME).exists():
-    print(f"Ya existe el usuario '{USERNAME}'")
-else:
-    user = User.objects.create(username=USERNAME, is_active=True)
-    user.set_password(PASSWORD)
-    user.save()
+                # 2. Crear la Caja Registradora
+                # El serializer usa 'public_id' como 'cash_register_id'
+                # Usamos get_or_create para evitar duplicados por nombre y sucursal
+                register, r_created = CashRegister.objects.get_or_create(
+                    name="Caja Principal PT1",
+                    branch=branch,
+                    defaults={
+                        "public_id": uuid.uuid4(), # Genera el UUID que pide tu Serializer
+                        "register_type": "BRANCH",
+                        "is_active": True
+                    }
+                )
 
-    # Asignar rol
-    role = Role.objects.get(code=ROLE_CODE)
-    UserRole.objects.create(user=user, role=role)
+                if r_created:
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Éxito: Caja '{register.name}' creada con ID: {register.public_id}"
+                        )
+                    )
+                else:
+                    self.stdout.write(
+                        self.style.WARNING(f"La caja '{register.name}' ya existía en {branch.code}.")
+                    )
 
-    # Asignar sucursal
-    branch = Branch.objects.get(code=BRANCH_CODE)
-    UserBranchAccess.objects.create(user=user, branch=branch)
+                self.stdout.write("--- Proceso Finalizado ---")
 
-    print(f"✓ Cajero '{USERNAME}' creado con rol {ROLE_CODE} y sucursal {BRANCH_CODE}")
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"Error fatal en el seed: {str(e)}"))
