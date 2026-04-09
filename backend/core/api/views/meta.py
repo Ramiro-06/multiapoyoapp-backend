@@ -5,16 +5,12 @@ from rest_framework.views import APIView
 from core.models import Branch
 from core.models_security import Role, UserRole
 
-OWNER_ROLE_CODE = ["OWNER_ADMIN", "CAJERO", "SUPERVISOR"]
+OWNER_ROLE_CODE = "OWNER_ADMIN"
 
 
 def _require_owner_admin(request):
-    # Esto obtiene los códigos de los roles del usuario, ej: {'CAJERO'}
-    user_roles = set(UserRole.objects.filter(user=request.user).values_list("role__code", flat=True))
-    
-    # OWNER_ROLE_CODE es una lista: ["OWNER_ADMIN", "CAJERO", "SUPERVISOR"]
-    # Usamos 'any' para ver si alguno de los roles permitidos está en los roles del usuario
-    return any(role in user_roles for role in OWNER_ROLE_CODE)
+    roles = set(UserRole.objects.filter(user=request.user).values_list("role__code", flat=True))
+    return OWNER_ROLE_CODE in roles
 
 
 class RolesMetaView(APIView):

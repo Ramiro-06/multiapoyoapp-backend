@@ -28,14 +28,14 @@ class UserListCreateView(APIView):
 
     def get(self, request):
         if not _require_owner_admin(request):
-            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+            return Response({"detail": "Solo PROPIETARIO_ADMIN."}, status=403)
 
         qs = User.objects.all().order_by("id")
         return Response(UserListSerializer(qs, many=True).data)
 
     def post(self, request):
         if not _require_owner_admin(request):
-            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+            return Response({"detail": "Solo PROPIETARIO_ADMIN."}, status=403)
 
         serializer = UserCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
