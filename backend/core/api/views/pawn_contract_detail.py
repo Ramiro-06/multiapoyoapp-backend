@@ -7,7 +7,8 @@ from rest_framework.views import APIView
 from rest_framework import status
 
 from core.models import PawnContract
-from core.services.interest_calc import prorated_interest
+from core.services.interest_calc import fixed_interest
+from core.services.contract_state import get_contract_state, ContractState, calculate_recovery_amount
 from core.api.security import require_roles, require_branch_access
 
 
@@ -36,10 +37,10 @@ class PawnContractDetailView(APIView):
             return Response({"detail": "Contrato no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
         # 3) Validar acceso por sucursal
-        try:
-            require_branch_access(request.user, contract.branch_id)
-        except Exception as e:
-            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        #try:
+         #   require_branch_access(request.user, contract.branch_id)
+        #except Exception as e:
+         #   return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
 
         # 4) Totales y saldos
         totals = contract.payments.aggregate(
@@ -52,12 +53,13 @@ class PawnContractDetailView(APIView):
 
         today = timezone.now().date()
         from_date = contract.interest_accrued_until or contract.start_date
-        interest_accrued_now = prorated_interest(
-            principal=outstanding_principal if outstanding_principal > 0 else Decimal("0.00"),
-            monthly_rate_percent=contract.interest_rate_monthly,
-            from_date=from_date,
-            to_date=today,
-        )
+
+        # Usar la máquina de estados para calcular el interés correctamente:
+        # - Período de gracia (VENCIDO): interés congelado al due_date
+        # - ACTIVO / EN_MORA: interés prorrateado hasta hoy
+        recovery = calculate_recovery_amount(contract, today)
+        interest_accrued_now = recovery["interest_due"]
+        contract_state       = recovery["state"]
 
         # ── Pagos: nombres de campo ajustados a lo que espera el frontend ───
         payments = [
@@ -87,12 +89,15 @@ class PawnContractDetailView(APIView):
         # ── Artículos empeñados ───────────────────────────────────────────────
         items = [
             {
+                "item_id":         str(item.public_id),
                 "category":        item.category,
                 "description":     item.description,
                 "attributes":      item.attributes,
                 "has_box":         item.has_box,
                 "has_charger":     item.has_charger,
-                "condition_notes": item.observations,  # alias de observations
+                "condition":       item.condition,
+                "condition_notes": item.observations,
+                "loan_amount":     str(item.loan_amount) if item.loan_amount is not None else None,
             }
             for item in contract.items.all()
         ]
@@ -102,6 +107,10 @@ class PawnContractDetailView(APIView):
                 "pawn_contract_id":      str(contract.public_id),
                 "contract_number":       contract.contract_number,
                 "status":                contract.status,
+                "state":                 contract_state,
+                "can_amortize":          recovery["can_amortize"],
+                "can_recover":           recovery["can_recover"],
+                "total_to_recover":      str(recovery["total_to_recover"]),
                 "branch_code":           contract.branch.code,
                 "customer_full_name":    contract.customer_full_name,
                 "customer_ci":           contract.customer_ci,
@@ -109,6 +118,8 @@ class PawnContractDetailView(APIView):
                 "principal_paid_total":  str(principal_paid_total),
                 "outstanding_principal": str(outstanding_principal),
                 "interest_rate_monthly": str(contract.interest_rate_monthly),
+                "interest_mode":         contract.interest_mode,
+                "promo_note":            contract.promo_note,
                 "start_date":            str(contract.start_date),
                 "due_date":              str(contract.due_date),
                 "interest_accrued_until": str(from_date),

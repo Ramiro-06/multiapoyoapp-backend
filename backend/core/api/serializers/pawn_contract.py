@@ -6,6 +6,8 @@ from core.api.serializers.pawn_item import PawnItemCreateSerializer
 class PawnContractCreateSerializer(serializers.Serializer):
     cash_session_id = serializers.UUIDField()
 
+    contract_number = serializers.CharField(max_length=20, required=True)  # Solo para pruebas, normalmente se ignora y se genera automáticamente
+
     customer_full_name = serializers.CharField(max_length=120)
     customer_ci = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
 
@@ -15,13 +17,14 @@ class PawnContractCreateSerializer(serializers.Serializer):
     due_date = serializers.DateField(required=False)
 
     interest_mode = serializers.ChoiceField(
-        choices=["MONTHLY_PRORATED", "FIXED", "PROMO"],
+        choices=["FIXED", "PROMO"],
         required=False,
-        default="MONTHLY_PRORATED",
+        default="FIXED",
     )
 
     promo_note = serializers.CharField(required=False, allow_blank=True, default="")
     
+    interest_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)  # Tasa manual para pruebas
 
     # ✅ ITEMS
     items = PawnItemCreateSerializer(many=True)

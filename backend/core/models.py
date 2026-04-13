@@ -15,6 +15,12 @@ class Branch(models.Model):
     code = models.CharField(max_length=20, unique=True)  # ej: PT1, PT2
     is_active = models.BooleanField(default=True)
 
+    # Días de gracia antes de marcar un contrato como DEFAULTED
+    grace_period_days = models.PositiveSmallIntegerField(
+        default=30,
+        help_text="Días hábiles de gracia tras el vencimiento antes de pasar a mora.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -149,32 +155,24 @@ class CashSession(models.Model):
         return f"{self.cash_register} - {self.status} - {self.opened_at:%Y-%m-%d %H:%M}"
     @property
     def expected_balance(self):
-        # Si la sesión ya fue cerrada, usamos el valor guardado (inmutable)
+        # Si la sesión ya fue cerrada, devolvemos el valor guardado en DB (inmutable)
         if self.closing_expected_amount is not None:
             return self.closing_expected_amount
 
-        # Movimientos _IN suman, movimientos _OUT restan
-        # Usamos agregación en DB para eficiencia (evita iterar en Python)
-        from django.db.models import Case, When, F, DecimalField
+        # Dos consultas simples: suma entradas y suma salidas
+        # (más confiable que Case/When para evitar falsos ceros)
+        total_in = (
+            self.movements
+            .filter(movement_type__endswith="_IN")
+            .aggregate(t=Sum("amount"))["t"]
+        ) or Decimal("0.00")
 
-        agg = self.movements.aggregate(
-            total_in=Sum(
-                Case(
-                    When(movement_type__endswith="_IN", then=F("amount")),
-                    default=Decimal("0.00"),
-                    output_field=DecimalField(),
-                )
-            ),
-            total_out=Sum(
-                Case(
-                    When(movement_type__endswith="_OUT", then=F("amount")),
-                    default=Decimal("0.00"),
-                    output_field=DecimalField(),
-                )
-            ),
-        )
-        total_in = agg["total_in"] or Decimal("0.00")
-        total_out = agg["total_out"] or Decimal("0.00")
+        total_out = (
+            self.movements
+            .filter(movement_type__endswith="_OUT")
+            .aggregate(t=Sum("amount"))["t"]
+        ) or Decimal("0.00")
+
         return self.opening_amount + total_in - total_out
 
     
@@ -184,14 +182,16 @@ class CashMovement(models.Model):
     Base para auditoría y cálculo de expected.
     """
     class MovementType(models.TextChoices):
-        # ── Existentes ──────────────────────────────────────────────
+        # ── Capital del dueño ────────────────────────────────────────
+        CAPITAL_IN     = "CAPITAL_IN",     "Inyección de Capital"
+        CAPITAL_OUT    = "CAPITAL_OUT",    "Retiro de Capital / Utilidad"
+        # ── Operaciones de caja ──────────────────────────────────────
         TRANSFER_IN    = "TRANSFER_IN",    "Transferencia Entrante"
         TRANSFER_OUT   = "TRANSFER_OUT",   "Transferencia Saliente"
         ADJUSTMENT_IN  = "ADJUSTMENT_IN",  "Ajuste Sobrante"
         ADJUSTMENT_OUT = "ADJUSTMENT_OUT", "Ajuste Faltante"
         LOAN_OUT       = "LOAN_OUT",       "CN – Desembolso de Contrato"
         PAYMENT_IN     = "PAYMENT_IN",     "CC/UC – Cobro de Contrato"
-        # ── Nuevos ──────────────────────────────────────────────────
         PURCHASE_OUT   = "PURCHASE_OUT",   "CD – Compra Directa"
         EXPENSE_OUT    = "EXPENSE_OUT",    "G – Gasto Operativo"
         VAULT_IN       = "VAULT_IN",       "Ingreso a Bóveda"
@@ -227,9 +227,12 @@ class PawnContract(models.Model):
     Auditoría: guarda tasa/condiciones al momento de crear.
     """
     class Status(models.TextChoices):
-        ACTIVE = "ACTIVE", "Activo"
-        CLOSED = "CLOSED", "Cerrado"
-        DEFAULTED = "DEFAULTED", "En mora"
+        ACTIVE     = "ACTIVE",     "Activo"
+        CLOSED     = "CLOSED",     "Cerrado"
+        DEFAULTED  = "DEFAULTED",  "En mora"
+        CANCELLED  = "CANCELLED",  "Cancelado"
+        EN_VENTA   = "EN_VENTA",   "En Vitrina"
+        SOLD       = "SOLD",       "Vendido"
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
@@ -260,20 +263,26 @@ class PawnContract(models.Model):
     start_date = models.DateField(default=timezone.now)
     due_date = models.DateField()  # fecha vencimiento
 
-    # Promos / prorrateo: guardamos regla aplicada para auditoría
+    # Modo de interés aplicado al contrato
     interest_mode = models.CharField(
         max_length=20,
-        default="MONTHLY_PRORATED",
-        help_text="MONTHLY_PRORATED (por días) / FIXED / PROMO"
+        default="FIXED",
+        help_text="FIXED (mensual fijo) / PROMO (condición especial)"
     )
     promo_note = models.CharField(max_length=255, blank=True, default="")
 
     # Caja / desembolso
     disbursed_cash_session = models.ForeignKey(CashSession, on_delete=models.PROTECT, related_name="pawn_disbursements")
 
+    # Mora automática
+    defaulted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Fecha/hora en que el contrato fue marcado automáticamente como DEFAULTED.",
+    )
+
     def __str__(self):
         return self.contract_number
-    
+
     interest_accrued_until = models.DateField(null=True, blank=True)
     
     investor = models.ForeignKey(
@@ -355,14 +364,58 @@ class PawnItem(models.Model):
     attributes = models.JSONField(default=dict, blank=True)
 
     # 📦 Estado físico
-    has_box = models.BooleanField(default=False)
-    has_charger = models.BooleanField(default=False)
+    class Condition(models.TextChoices):
+        EXCELLENT = "EXCELLENT", "Excelente"
+        GOOD      = "GOOD",      "Bueno"
+        WORN      = "WORN",      "Desgastado"
+        DAMAGED   = "DAMAGED",   "Dañado"
+
+    has_box      = models.BooleanField(default=False)
+    has_charger  = models.BooleanField(default=False)
+    condition    = models.CharField(max_length=20, choices=Condition.choices, default=Condition.GOOD,
+                                    help_text="Estado del artículo: ajusta la sugerencia MVI")
     observations = models.TextField(blank=True)
+
+    # Monto prestado por este artículo (parte proporcional del principal_amount)
+    # Útil cuando hay múltiples artículos y se quiere calcular precio de venta por ítem.
+    loan_amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Capital prestado atribuido a este artículo específico",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.category} - {self.contract.contract_number}"
+
+
+class PawnAmortization(models.Model):
+    """
+    Adenda de amortización: el cliente paga interés + abona capital.
+    Solo se crea cuando el contrato está en estado ACTIVO (today < due_date).
+    """
+    public_id      = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    contract       = models.ForeignKey(PawnContract, on_delete=models.PROTECT, related_name="amortizations")
+    cash_session   = models.ForeignKey(CashSession,   on_delete=models.PROTECT, related_name="amortizations")
+    performed_by   = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="amortizations")
+    performed_at   = models.DateTimeField(auto_now_add=True)
+
+    outstanding_before  = models.DecimalField(max_digits=12, decimal_places=2)  # capital antes
+    capital_paid        = models.DecimalField(max_digits=12, decimal_places=2)  # abono a capital
+    interest_paid       = models.DecimalField(max_digits=12, decimal_places=2)  # UC cobrada
+
+    previous_due_date   = models.DateField()
+    new_due_date        = models.DateField()
+
+    note = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        verbose_name = "Amortización"
+        verbose_name_plural = "Amortizaciones"
+
+    def __str__(self):
+        return f"Amort {self.contract.contract_number} -{self.capital_paid}"
 
 
 class Transfer(models.Model):
@@ -497,6 +550,14 @@ class Customer(models.Model):
     category = models.CharField(
         max_length=10, choices=Category.choices, default=Category.BRONCE,
     )
+
+    # Tasa personalizada (anula política de categoría si está definida)
+    custom_rate_pct = models.DecimalField(
+        max_digits=6, decimal_places=2,
+        null=True, blank=True,
+        help_text="Tasa mensual personalizada. Vacío = usar política de categoría.",
+    )
+
     score = models.IntegerField(
         default=50,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
@@ -719,3 +780,72 @@ class CashExpense(models.Model):
 
     def __str__(self):
         return f"[{self.category}] {self.description[:40]} – {self.cash_movement.amount} Bs."
+
+class InterestCategoryConfig(models.Model):
+    """
+    Configuración de tasas de interés por categoría de cliente.
+    El dueño puede ajustar las tasas base sin tocar el código.
+    Si no existe un registro para una categoría se usan los defaults del código.
+    """
+    class Category(models.TextChoices):
+        BRONCE = "BRONCE", "Bronce"
+        PLATA  = "PLATA",  "Plata"
+        ORO    = "ORO",    "Oro"
+
+    category = models.CharField(
+        max_length=10, choices=Category.choices, unique=True,
+    )
+    base_rate_pct = models.DecimalField(
+        max_digits=6, decimal_places=2,
+        help_text="Tasa mensual base (%) para esta categoría",
+    )
+    max_principal = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        help_text="Capital máximo prestable para esta categoría (Bs.)",
+    )
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="interest_configs_updated",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración de Tasa por Categoría"
+        verbose_name_plural = "Configuraciones de Tasas"
+
+    def __str__(self):
+        return f"{self.category}: {self.base_rate_pct}% / max {self.max_principal}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MÓDULO RRHH — importado desde models_hr.py para que Django lo descubra
+# ─────────────────────────────────────────────────────────────────────────────
+from core.models_hr import (  # noqa: E402
+    HRConfig,
+    Employee,
+    SalaryScale,
+    AttendanceRecord,
+    SalaryPeriod,
+    VacationPeriod,
+    EmployeeTermination,
+    AguinaldoPeriod,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MÓDULO INVENTARIO — importado desde models_inventory.py
+# ─────────────────────────────────────────────────────────────────────────────
+from core.models_inventory import (  # noqa: E402
+    DirectPurchase,
+    DirectPurchasePhoto,
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MÓDULO MVI — importado desde models_mvi.py
+# ─────────────────────────────────────────────────────────────────────────────
+from core.models_mvi import (  # noqa: E402
+    MVIConfig,
+    AppraisalOverride,
+)

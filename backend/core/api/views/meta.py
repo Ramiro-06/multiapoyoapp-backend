@@ -18,7 +18,7 @@ class RolesMetaView(APIView):
 
     def get(self, request):
         if not _require_owner_admin(request):
-            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+            return Response({"detail": "Solo PROPIETARIO_ADMIN."}, status=403)
 
         data = list(Role.objects.all().values("code", "name"))
         return Response(data)
@@ -29,7 +29,7 @@ class BranchesMetaView(APIView):
 
     def get(self, request):
         if not _require_owner_admin(request):
-            return Response({"detail": "Solo OWNER_ADMIN."}, status=403)
+            return Response({"detail": "Solo PROPIETARIO_ADMIN."}, status=403)
 
         data = list(Branch.objects.filter(is_active=True).values("code", "name"))
         return Response(data)
