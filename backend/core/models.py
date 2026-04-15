@@ -358,6 +358,11 @@ class PawnRenewal(models.Model):
     amount_charged = models.DecimalField(max_digits=12, decimal_places=2)
     interest_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     fee_charged = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    effective_date = models.DateField(
+        null=True, 
+        blank=True, 
+        help_text="Fecha real de la operación para registros históricos"
+    )
 
     note = models.CharField(max_length=255, blank=True, default="")
 

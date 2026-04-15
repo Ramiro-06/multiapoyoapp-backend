@@ -68,6 +68,7 @@ class PawnContractDetailView(APIView):
                 "principal_paid": str(p.principal_paid),
                 "interest_paid":  str(p.interest_paid),
                 "note":          p.note,
+                "effective_date": str(p.effective_date) if hasattr(p, 'effective_date') else str(p.paid_at.date()),
             }
             for p in contract.payments.order_by("paid_at")
         ]
@@ -81,6 +82,7 @@ class PawnContractDetailView(APIView):
                 "interest_charged": str(r.interest_charged),
                 "fee_charged":      str(r.fee_charged),
                 "amount_charged":   str(r.amount_charged),
+                "effective_date":   str(r.effective_date),
             }
             for r in contract.renewals.order_by("renewed_at")
         ]
