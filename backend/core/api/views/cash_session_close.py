@@ -32,7 +32,7 @@ class CashSessionCloseView(APIView):
             return Response({"detail": "No tiene permisos."}, status=403)
 
         with transaction.atomic():
-            cash_session = CashSession.objects.select_for_update().select_related(
+            cash_session = CashSession.objects.select_for_update(of=('self',)).select_related(
                 "cash_register", "branch", "opened_by"
             ).get(public_id=cash_session_id)
 
