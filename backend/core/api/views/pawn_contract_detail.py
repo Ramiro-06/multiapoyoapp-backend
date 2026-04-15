@@ -7,7 +7,6 @@ from rest_framework.views import APIView
 from rest_framework import status
 
 from core.models import PawnContract
-from core.services.interest_calc import fixed_interest
 from core.services.contract_state import get_contract_state, ContractState, calculate_recovery_amount
 from core.api.security import require_roles, require_branch_access
 
@@ -37,10 +36,10 @@ class PawnContractDetailView(APIView):
             return Response({"detail": "Contrato no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
         # 3) Validar acceso por sucursal
-        #try:
-         #   require_branch_access(request.user, contract.branch_id)
-        #except Exception as e:
-         #   return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            require_branch_access(request.user, contract.branch_id)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
 
         # 4) Totales y saldos
         totals = contract.payments.aggregate(

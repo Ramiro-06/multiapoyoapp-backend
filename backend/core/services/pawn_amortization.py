@@ -49,11 +49,7 @@ def calculate_amortization_preview(contract, capital_to_pay: Decimal, today: dat
             f"({outstanding}). Para cancelar la deuda completa use el endpoint de pago."
         )
 
-    from_date = contract.interest_accrued_until or contract.start_date
-    interest_due = fixed_interest(
-        principal=outstanding,
-        monthly_rate_percent=contract.interest_rate_monthly,
-    )
+    interest_due = fixed_interest(outstanding, contract.interest_rate_monthly)
 
     new_principal = (outstanding - capital_to_pay).quantize(Decimal("0.01"))
     total_to_pay  = (interest_due + capital_to_pay).quantize(Decimal("0.01"))

@@ -105,19 +105,9 @@ def calculate_recovery_amount(contract, today=None) -> dict:
 
     state = get_contract_state(contract, today)
     outstanding = calculate_outstanding_principal(contract)
-    from_date = contract.interest_accrued_until or contract.start_date
 
-    # Durante el período de gracia el monto queda congelado al due_date
-    if state == ContractState.VENCIDO:
-        interest_to = contract.due_date
-    else:
-        interest_to = today
-
-    interest = fixed_interest(
-        principal=outstanding,
-        monthly_rate_percent=contract.interest_rate_monthly,
-    )
-
+    # Interés mensual fijo sobre el capital pendiente — sin prorrateo por días
+    interest = fixed_interest(outstanding, contract.interest_rate_monthly)
 
     return {
         "state":                state,

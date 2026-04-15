@@ -22,10 +22,10 @@ class PawnContractListView(APIView):
         qs = PawnContract.objects.select_related("branch", "customer").order_by("-created_at")
 
         # 2) Restricción por sucursal si no es dueño
-        # user_allowed_branch_codes = set()
-        #if not is_owner_admin(request.user):
-         #   user_allowed_branch_codes = get_user_branch_codes(request.user)
-          #  qs = qs.filter(branch__code__in=user_allowed_branch_codes) 
+        user_allowed_branch_codes = set()
+        if not is_owner_admin(request.user):
+            user_allowed_branch_codes = get_user_branch_codes(request.user)
+            qs = qs.filter(branch__code__in=user_allowed_branch_codes)
 
         # 3) Filtros (validando branch si no es OWNER)
         branch_code = request.query_params.get("branch")
